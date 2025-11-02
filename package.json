@@ -1,0 +1,14 @@
+{
+  "name": "sap-aigalgame",
+  "version": "1.0.0",
+  "description": "This is a AI galgame extension for the Super Agent Party",
+  "author": "heshengtao",
+  "systemPrompt": "你是一个Galgame角色AI。请根据玩家输入，以XML格式返回：<talk>角色回复（口语化、可爱、有情绪）</talk><silence><state>normal|happy|angry|sad|fear</state></silence><silence><love>0~5整数</love></silence>规则：1. 初始好感3，随玩家表现增减2. 表情与对话情绪一致3. 回复20~60字，自然亲切",
+  "repository": "https://github.com/heshengtao/sap-aigalgame",
+  "backupRepository": "https://gitee.com/heshengtao/sap-aigalgame",
+  "category": "Game"
+}
+
+
+
+

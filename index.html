@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AI Galgame</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+:root{
+  --text: #e8e8e8;
+  --accent: #ff6b35;
+  --border: rgba(255,255,255,.15);
+  --radius: 12px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: var(--font); }
+html,body{ height: 100%; overflow: hidden; }
+body{
+  background: #000 url("background/sea.png") center/cover no-repeat;
+  color: var(--text); font-size: 16px; line-height: 1.6;
+}
+/* 立绘层 */
+#characterLayer{
+  position: absolute; inset: 0; z-index: 1;
+  display: flex; align-items: flex-end; justify-content: center;
+  pointer-events: none;
+}
+#characterLayer img{
+  width: 90vw; max-width: 900px; height: 90%; max-height: 100vh;
+  object-fit: contain; object-position: bottom center;
+  transition: opacity .25s ease;
+}
+/* 好感度 */
+#loveMeter{
+  position: absolute; top: 20px; left: 20px; z-index: 10;
+  display: flex; gap: 8px; background: rgba(0,0,0,.35);
+  padding: 8px 12px; border-radius: var(--radius); backdrop-filter: blur(6px);
+}
+.heart{ font-size: 24px; color: var(--accent); }
+.heart.empty{ color: var(--border); }
+/* 对话框 */
+#talkBox{
+  position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%);
+  width: 90vw; max-width: 800px; background: rgba(0,0,0,.45);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 20px 24px; z-index: 10; backdrop-filter: blur(8px);
+  min-height: 100px;
+}
+#talkBox .name{ color: var(--accent); font-weight: bold; margin-bottom: 8px; }
+#talkBox .text{ font-size: 18px; line-height: 1.7; white-space: pre-wrap; }
+/* 输入框 */
+#inputBox{
+  position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+  width: 90vw; max-width: 800px; display: flex; gap: 10px; z-index: 10;
+}
+#inputBox input{
+  flex: 1; background: rgba(0,0,0,.45); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 16px; color: var(--text);
+  font-size: 16px; backdrop-filter: blur(8px);
+}
+#inputBox input:focus{ outline: none; border-color: var(--accent); }
+#inputBox button{
+  background: var(--accent); border: none; border-radius: var(--radius);
+  padding: 0 20px; color: #fff; font-size: 16px; cursor: pointer;
+  transition: background .3s;
+}
+#inputBox button:hover{ background: #ff8559; }
+/* 右上角按钮 */
+#settingsButtons{
+  position: absolute; top: 20px; right: 20px; z-index: 10;
+  display: flex; gap: 10px;
+}
+#settingsButtons button{
+  background: rgba(0,0,0,.35); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px 15px; color: var(--text);
+  font-size: 16px; cursor: pointer; backdrop-filter: blur(6px);
+  transition: background .3s;
+}
+#settingsButtons button:hover{ background: rgba(0,0,0,.5); }
+/* 模态框 */
+.modal{
+  display: none; position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,.7); backdrop-filter: blur(10px);
+}
+.modal.active{ display: flex; align-items: center; justify-content: center; }
+.modal-content{
+  background: rgba(20,20,20,.9); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 30px; max-width: 90vw; max-height: 80vh;
+  overflow-y: auto; position: relative;
+  width: 60%;
+}
+.modal-header{
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 20px;
+}
+.modal-header h2{ color: var(--accent); }
+.close-btn{
+  background: none; border: none; color: var(--text); font-size: 24px;
+  cursor: pointer; padding: 5px;
+}
+.close-btn:hover{ color: var(--accent); }
+.grid{
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 15px;
+}
+.grid-item{
+  background: rgba(255,255,255,.05); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px; cursor: pointer;
+  text-align: center; transition: all .3s;
+}
+.grid-item:hover{ background: rgba(255,255,255,.1); border-color: var(--accent); }
+.grid-item img{
+  width: 100%; height: 100px; object-fit: cover; border-radius: 8px;
+  margin-bottom: 8px;
+}
+.grid-item p{ font-size: 14px; color: var(--text); }
+</style>
+</head>
+<body>
+
+<!-- 立绘 -->
+<div id="characterLayer">
+  <img id="charImg" src="person/alice/normal.png" alt=""/>
+</div>
+
+<!-- 好感度 -->
+<div id="loveMeter">
+  <i class="fa-solid fa-heart heart" data-index="1"></i>
+  <i class="fa-solid fa-heart heart" data-index="2"></i>
+  <i class="fa-solid fa-heart heart" data-index="3"></i>
+  <i class="fa-solid fa-heart heart empty" data-index="4"></i>
+  <i class="fa-solid fa-heart heart empty" data-index="5"></i>
+</div>
+
+<!-- 右上角按钮 -->
+<div id="settingsButtons">
+  <button id="bgBtn"><i class="fas fa-image"></i> 背景</button>
+  <button id="charBtn"><i class="fas fa-user"></i> 人物</button>
+</div>
+
+<!-- 对话框 -->
+<div id="talkBox">
+  <div class="name" id="charName">Alice</div>
+  <div class="text" id="talkText"></div>
+</div>
+
+<!-- 输入 -->
+<div id="inputBox">
+  <input id="userInput" type="text" placeholder="输入想说的话，回车发送" autocomplete="off"/>
+  <button id="sendBtn"><i class="fa-solid fa-paper-plane"></i></button>
+</div>
+
+<!-- 背景选择模态框 -->
+<div id="bgModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>选择背景</h2>
+      <button class="close-btn" onclick="closeModal('bgModal')">&times;</button>
+    </div>
+    <div id="bgGrid" class="grid"></div>
+  </div>
+</div>
+
+<!-- 人物选择模态框 -->
+<div id="charModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>选择人物</h2>
+      <button class="close-btn" onclick="closeModal('charModal')">&times;</button>
+    </div>
+    <div id="charGrid" class="grid"></div>
+  </div>
+</div>
+
+<script>
+  /* =========================  状态  ========================= */
+let ws;
+let isGenerating = false;
+let currentLove = 3;
+let currentEmotion = 'normal';
+let lastRaw = '';
+let pendingState = null;
+
+// 读取上次用户选择
+let currentBg   = localStorage.getItem('selectedBg')   || 'sea';
+let currentChar = localStorage.getItem('selectedChar') || 'alice';
+let currentCharName = currentChar.charAt(0).toUpperCase() + currentChar.slice(1);
+
+const emotions = {
+  normal: 'normal.png',
+  happy : 'happy.png',
+  angry : 'angry.png',
+  sad   : 'sad.png',
+  fear  : 'fear.png'
+};
+
+/* =========================  工具  ========================= */
+function setLove(n) {
+  currentLove = Math.max(0, Math.min(5, n));
+  document.querySelectorAll('.heart').forEach((h, i) =>
+    h.classList.toggle('empty', i >= currentLove)
+  );
+}
+function setEmotion(e) {
+  if (!emotions[e]) e = 'normal';
+  if (e === currentEmotion) return;
+  currentEmotion = e;
+  const img = document.getElementById('charImg');
+  img.style.opacity = 0;
+  requestAnimationFrame(() => {
+    img.src = `person/${currentChar}/${emotions[e]}`;
+    img.style.opacity = 1;
+  });
+}
+function streamTalk(txt) {
+  document.getElementById('talkText').innerHTML = txt;
+}
+
+/* =========================  模态框  ========================= */
+function openModal(id) { document.getElementById(id).classList.add('active'); }
+function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+
+/* 动态加载背景列表 */
+async function loadBackgrounds() {
+  const res  = await fetch('background/index.json');
+  const list = await res.json();
+  const grid = document.getElementById('bgGrid');
+  grid.innerHTML = '';
+  list.forEach(file => {
+    const name = file.replace('.png', '');
+    const item = document.createElement('div');
+    item.className = 'grid-item';
+    item.innerHTML = `<img src="background/${file}" loading="lazy"><p>${name}</p>`;
+    item.onclick = () => selectBackground(name);
+    grid.appendChild(item);
+  });
+}
+
+/* 动态加载人物列表 */
+async function loadCharacters() {
+  const res  = await fetch('person/index.json');
+  const list = await res.json();
+  const grid = document.getElementById('charGrid');
+  grid.innerHTML = '';
+  list.forEach(folder => {
+    const item = document.createElement('div');
+    item.className = 'grid-item';
+    item.innerHTML = `<img src="person/${folder}/normal.png" loading="lazy"><p>${folder}</p>`;
+    item.onclick = () => selectCharacter(folder);
+    grid.appendChild(item);
+  });
+}
+
+function selectBackground(name) {
+  currentBg = name;
+  document.body.style.backgroundImage = `url(background/${name}.png)`;
+  localStorage.setItem('selectedBg', name);
+  closeModal('bgModal');
+}
+function selectCharacter(folder) {
+  currentChar = folder;
+  currentCharName = folder.charAt(0).toUpperCase() + folder.slice(1);
+  document.getElementById('charName').textContent = currentCharName;
+  document.getElementById('charImg').src = `person/${folder}/normal.png`;
+  localStorage.setItem('selectedChar', folder);
+  closeModal('charModal');
+}
+
+/* 应用上次保存的设置 */
+function applySaved() {
+  document.body.style.backgroundImage = `url(background/${currentBg}.png)`;
+  document.getElementById('charName').textContent = currentCharName;
+  document.getElementById('charImg').src = `person/${currentChar}/normal.png`;
+}
+
+/* =========================  WebSocket  ========================= */
+function initWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+  ws.onopen  = () => console.log('WS connected');
+  ws.onclose = () => setTimeout(initWS, 3000);
+  ws.onmessage = e => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.type === 'messages_update' || d.type === 'broadcast_messages') {
+        const msgs = d.data.messages;
+        if (msgs.length) {
+          const m = msgs[msgs.length - 1];
+          if (m.role === 'assistant') parseAndRender(m.content);
+        }
+      }
+    } catch {}
+  };
+}
+
+function parseAndRender(raw) {
+  if (raw === lastRaw) return;
+  lastRaw = raw;
+
+  const talkOpen  = raw.lastIndexOf('<talk>');
+  const talkClose = raw.lastIndexOf('</talk>');
+  if (talkOpen !== -1) {
+    const currentTalk = talkClose === -1 || talkClose < talkOpen
+                      ? raw.substring(talkOpen + 6)
+                      : raw.substring(talkOpen + 6, talkClose);
+    streamTalk(currentTalk);
+  }
+
+  const st = (raw.match(/<state>([\s\S]*?)<\/state>/) || [])[1]?.trim();
+  const lv = parseInt((raw.match(/<love>([\s\S]*?)<\/love>/) || [])[1]);
+  if (st || !isNaN(lv)) {
+    if (!pendingState) pendingState = {};
+    if (st) pendingState.emotion = st;
+    if (!isNaN(lv)) pendingState.love = lv;
+  }
+  if (raw.includes('</talk>') && pendingState) {
+    if (pendingState.emotion) setEmotion(pendingState.emotion);
+    if (pendingState.love != null) setLove(pendingState.love);
+    pendingState = null;
+  }
+}
+
+function send(msg) {
+  if (!ws || ws.readyState !== 1 || !msg.trim() || isGenerating) return;
+  isGenerating = true;
+  ws.send(JSON.stringify({ type: 'set_user_input', data: { text: msg } }));
+  ws.send(JSON.stringify({ type: 'trigger_send_message' }));
+  setTimeout(() => (isGenerating = false), 600);
+}
+
+/* =========================  输入绑定  ========================= */
+const ui = document.getElementById('userInput');
+ui.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { send(ui.value); ui.value = ''; }
+});
+document.getElementById('sendBtn').addEventListener('click', () => {
+  send(ui.value); ui.value = '';
+});
+
+/* 模态框按钮 */
+document.getElementById('bgBtn').addEventListener('click', () => {
+  loadBackgrounds(); openModal('bgModal');
+});
+document.getElementById('charBtn').addEventListener('click', () => {
+  loadCharacters(); openModal('charModal');
+});
+
+/* =========================  入口  ========================= */
+document.addEventListener('DOMContentLoaded', () => {
+  applySaved();
+  setLove(3);
+  setEmotion('normal');
+  initWS();
+});
+</script>
+
+<style>
+#charImg{ transition: opacity .35s ease; }
+</style>
+
+<!-- AI 提示词（隐藏） -->
+<!--
+你是一个Galgame角色AI。请根据玩家输入，以XML格式返回：
+<talk>角色回复（口语化、可爱、有情绪）</talk>
+<state>normal|happy|angry|sad|fear</state>
+<love>0~5整数</love>
+
+规则：
+1. 初始好感3，随玩家表现增减
+2. 表情与对话情绪一致
+3. 回复20~60字，自然亲切
+-->
+</body>
+</html>
