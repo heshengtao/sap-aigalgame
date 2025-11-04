@@ -114,6 +114,44 @@ body{
   margin-bottom: 8px;
 }
 .grid-item p{ font-size: 14px; color: var(--text); }
+/* =====  选项模式  ===== */
+.hidden{ display:none !important; }
+#choiceBox{
+  position:absolute;
+  bottom:30px;
+  left:50%;
+  transform:translateX(-50%);
+  width:90vw; max-width:800px;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  z-index:10;
+}
+.choice{
+  background:rgba(0,0,0,.45);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:14px 12px;
+  color:var(--text);
+  font-size:16px;
+  cursor:pointer;
+  backdrop-filter:blur(8px);
+  transition:border-color .3s;
+  text-align:center;
+}
+.choice:hover{ border-color:var(--accent); }
+:root{
+  --input-height: 60px;   /* 初始占位，JS会盖掉 */
+}
+#talkBox{
+  bottom: calc(30px + var(--input-height) + 20px); /* 30=底部留白,20=间距 */
+  max-height: calc(100vh - var(--input-height) - 120px); /* 120=上下额外留白 */
+  overflow-y: auto;
+  transition: bottom .3s ease, max-height .3s ease;
+}
+#choiceBox{
+  gap: 10px;
+}
 </style>
 </head>
 <body>
@@ -128,12 +166,18 @@ body{
   <i class="fa-solid fa-heart heart" data-index="1"></i>
   <i class="fa-solid fa-heart heart" data-index="2"></i>
   <i class="fa-solid fa-heart heart" data-index="3"></i>
-  <i class="fa-solid fa-heart heart empty" data-index="4"></i>
-  <i class="fa-solid fa-heart heart empty" data-index="5"></i>
+  <i class="fa-solid fa-heart heart" data-index="4"></i>
+  <i class="fa-solid fa-heart heart" data-index="5"></i>
+  <i class="fa-solid fa-heart heart empty" data-index="6"></i>
+  <i class="fa-solid fa-heart heart empty" data-index="7"></i>
+  <i class="fa-solid fa-heart heart empty" data-index="8"></i>
+  <i class="fa-solid fa-heart heart empty" data-index="9"></i>
+  <i class="fa-solid fa-heart heart empty" data-index="10"></i>
 </div>
 
 <!-- 右上角按钮 -->
 <div id="settingsButtons">
+  <button id="modeBtn"><i class="fas fa-exchange-alt"></i> 自动</button>
   <button id="bgBtn"><i class="fas fa-image"></i> 背景</button>
   <button id="charBtn"><i class="fas fa-user"></i> 人物</button>
 </div>
@@ -148,6 +192,13 @@ body{
 <div id="inputBox">
   <input id="userInput" type="text" placeholder="输入想说的话，回车发送" autocomplete="off"/>
   <button id="sendBtn"><i class="fa-solid fa-paper-plane"></i></button>
+</div>
+
+<div id="choiceBox" class="hidden">
+  <button class="choice" data-index="0"></button>
+  <button class="choice" data-index="1"></button>
+  <button class="choice" data-index="2"></button>
+  <button class="choice" data-index="3"></button>
 </div>
 
 <!-- 背景选择模态框 -->
@@ -176,10 +227,11 @@ body{
   /* =========================  状态  ========================= */
 let ws;
 let isGenerating = false;
-let currentLove = 3;
+let currentLove = 5;
 let currentEmotion = 'normal';
 let lastRaw = '';
 let pendingState = null;
+let backgroundList = []; // 存储所有背景列表
 
 // 读取上次用户选择
 let currentBg   = localStorage.getItem('selectedBg')   || 'sea';
@@ -196,7 +248,7 @@ const emotions = {
 
 /* =========================  工具  ========================= */
 function setLove(n) {
-  currentLove = Math.max(0, Math.min(5, n));
+  currentLove = Math.max(0, Math.min(10, n));
   document.querySelectorAll('.heart').forEach((h, i) =>
     h.classList.toggle('empty', i >= currentLove)
   );
@@ -224,6 +276,7 @@ function closeModal(id) { document.getElementById(id).classList.remove('active')
 async function loadBackgrounds() {
   const res  = await fetch('background/index.json');
   const list = await res.json();
+  backgroundList = list.map(file => file.replace('.png', '')); // 保存背景列表
   const grid = document.getElementById('bgGrid');
   grid.innerHTML = '';
   list.forEach(file => {
@@ -256,7 +309,9 @@ function selectBackground(name) {
   document.body.style.backgroundImage = `url(background/${name}.png)`;
   localStorage.setItem('selectedBg', name);
   closeModal('bgModal');
+  updateSystemPromptWithBackground(); // 背景切换时更新系统提示词
 }
+
 function selectCharacter(folder) {
   currentChar = folder;
   currentCharName = folder.charAt(0).toUpperCase() + folder.slice(1);
@@ -277,7 +332,11 @@ function applySaved() {
 function initWS() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${proto}//${location.host}/ws`);
-  ws.onopen  = () => console.log('WS connected');
+  ws.onopen  = async () =>  {
+    console.log('WS connected');
+    await loadBackgrounds();
+    updateSystemPromptWithBackground(); // 连接建立后发送初始系统提示词
+  };
   ws.onclose = () => setTimeout(initWS, 3000);
   ws.onmessage = e => {
     try {
@@ -328,6 +387,52 @@ function send(msg) {
   setTimeout(() => (isGenerating = false), 600);
 }
 
+function updateSystemPrompt(msg) {
+  if (!ws || ws.readyState !== 1 || !msg.trim() || isGenerating) return;
+  isGenerating = true;
+  ws.send(JSON.stringify({ type: 'set_system_prompt', data: { text: msg } }));
+  setTimeout(() => (isGenerating = false), 600);
+}
+
+/* ========== 动态生成包含背景信息的系统提示词 ========== */
+function updateSystemPromptWithBackground() {
+  // 基础提示词模板
+  let basePrompt = mode === 'chat' ? 
+    `你是一个Galgame角色AI。请根据玩家输入，以XML格式返回：
+<talk>角色回复（口语化、可爱、有情绪）</talk>
+<silence><state>normal|happy|angry|sad|fear</state></silence>
+<silence><love>0~10整数</love></silence>
+<silence><bg>你要切换的背景图（可选，不切换时，不用生成）</bg></silence>
+
+规则：
+1. 初始好感5，随玩家表现增减
+2. 表情与对话情绪一致
+3. 回复20~60字，自然亲切` : 
+    `你是一个Galgame角色AI。请根据玩家输入生成回复和四个游戏选项，以XML格式返回：
+<talk>角色回复（口语化、可爱、有情绪）</talk>
+<silence><option>选项A</option></silence>
+<silence><option>选项B</option></silence>
+<silence><option>选项C</option></silence>
+<silence><option>选项d</option></silence>
+<silence><state>normal|happy|angry|sad|fear</state></silence>
+<silence><love>0~10整数</love></silence>
+<silence><bg>你要切换的背景图（可选，不切换时，不用生成）</bg></silence>
+规则：
+1. 初始好感5，随玩家表现增减
+2. 表情与对话情绪一致
+3. 回复20~60字，自然亲切`;
+
+  // 添加背景信息
+  let backgroundInfo = `\n\n当前场景背景: ${currentBg}`;
+  if (backgroundList.length > 0) {
+    backgroundInfo += `\n可选背景列表: ${backgroundList.join(', ')}`;
+  }
+  
+  // 组合完整的提示词
+  const fullPrompt = basePrompt + backgroundInfo;
+  updateSystemPrompt(fullPrompt);
+}
+
 /* =========================  输入绑定  ========================= */
 const ui = document.getElementById('userInput');
 ui.addEventListener('keydown', e => {
@@ -348,27 +453,127 @@ document.getElementById('charBtn').addEventListener('click', () => {
 /* =========================  入口  ========================= */
 document.addEventListener('DOMContentLoaded', () => {
   applySaved();
-  setLove(3);
+  setLove(5);
   setEmotion('normal');
   initWS();
+  loadBackgrounds(); // 加载背景列表
 });
+/* ==========  模式切换  ========== */
+let mode = 'chat';            // chat | choice
+const modeBtn = document.getElementById('modeBtn');
+const inputBox  = document.getElementById('inputBox');
+const choiceBox = document.getElementById('choiceBox');
+const choiceBtns = Array.from(document.querySelectorAll('.choice'));
+
+/* ==========  模式切换  ========== */
+modeBtn.onclick = () => {
+  mode = mode === 'chat' ? 'choice' : 'chat';
+  modeBtn.innerHTML = mode === 'chat'
+        ? '<i class="fas fa-exchange-alt"></i> 自动'
+        : '<i class="fas fa-comment-dots"></i> 手动';
+  inputBox.classList.toggle('hidden',  mode === 'choice');
+  choiceBox.classList.toggle('hidden', mode === 'chat');
+
+  /* 更新后端系统提示词 */
+  updateSystemPromptWithBackground();
+
+  //等待1秒
+  setTimeout(function() {
+    /* 🔥 切到选项模式时，自动让 AI 开局 */
+    if (mode === 'choice') {
+      send('请根据当前人设开始扮演并生成选项');
+    }
+  }, 1000);
+};
+/* 把选项当用户输入发出去 */
+choiceBtns.forEach((btn,idx)=>{
+  btn.onclick = () => send(btn.textContent);
+});
+
+/* ========== 去标签工具 ========== */
+function stripTag(str){
+  // 去掉 <option> 与 </option>
+  return str.replace(/<\/?option>/g, '');
+}
+
+/* ========== 选项真正流式累积（修正版） ========== */
+const optBuffers = ['','','',''];
+let optWriting = 0;
+
+function parseAndRender(raw){
+  if(raw === lastRaw) return;
+  lastRaw = raw;
+
+  /* 1. 对话部分（保持原样） */
+  const talkOpen  = raw.lastIndexOf('<talk>');
+  const talkClose = raw.lastIndexOf('</talk>');
+  if(talkOpen !== -1){
+    const txt = (talkClose === -1 || talkClose < talkOpen)
+              ? raw.substring(talkOpen + 6)
+              : raw.substring(talkOpen + 6, talkClose);
+    streamTalk(txt);
+  }
+
+  /* 2. 选项流式（不显示标签） --------------------------- */
+  if(mode === 'choice'){
+    let idx = 0;
+    raw.replace(/<option>([\s\S]*?)<\/option>|(<option>)([\s\S]*)$/g, (m, closed, open, openFrag)=>{
+      const fragment = stripTag(closed || openFrag); // 去掉标签
+      const targetIdx = idx++;
+      if(targetIdx > 3) return;
+      optBuffers[targetIdx] = fragment;
+      choiceBtns[targetIdx].textContent = fragment;   // 纯文本写进按钮
+      optWriting = targetIdx + 1;
+      return '';
+    });
+  }
+
+  /* 3. 背景切换 */
+  const bgMatch = raw.match(/<bg>([\s\S]*?)<\/bg>/);
+  if (bgMatch && bgMatch[1]) {
+    const newBg = bgMatch[1].trim();
+    if (backgroundList.includes(newBg)) {
+      selectBackground(newBg); // 切换到新背景
+    }
+  }
+
+  /* 4. 状态/好感（保持原样） */
+  const st = (raw.match(/<state>([\s\S]*?)<\/state>/) || [])[1]?.trim();
+  const lv = parseInt((raw.match(/<love>([\s\S]*?)<\/love>/) || [])[1]);
+  if(st || !isNaN(lv)){
+    if(!pendingState) pendingState = {};
+    if(st) pendingState.emotion = st;
+    if(!isNaN(lv)) pendingState.love = lv;
+  }
+  if(raw.includes('</talk>') && pendingState){
+    if(pendingState.emotion) setEmotion(pendingState.emotion);
+    if(pendingState.love != null) setLove(pendingState.love);
+    pendingState = null;
+  }
+}
+
+/* ========== 动态高度避让 ========== */
+function updateInputHeight(){
+  const box = (mode === 'chat') ? document.getElementById('inputBox')
+                                : document.getElementById('choiceBox');
+  const h = box.offsetHeight;
+  document.documentElement.style.setProperty('--input-height', h + 'px');
+}
+/* 重要节点触发 */
+window.addEventListener('resize', updateInputHeight);
+modeBtn.addEventListener('click', () => setTimeout(updateInputHeight, 50)); // 等DOM切换完
+// 选项内容变化也触发
+const origParse = parseAndRender;
+parseAndRender = function(raw){
+  origParse(raw);
+  if(mode === 'choice' && raw.includes('<option>')) updateInputHeight();
+};
+/* 页面初始 */
+requestAnimationFrame(updateInputHeight);
 </script>
 
 <style>
 #charImg{ transition: opacity .35s ease; }
 </style>
-
-<!-- AI 提示词（隐藏） -->
-<!--
-你是一个Galgame角色AI。请根据玩家输入，以XML格式返回：
-<talk>角色回复（口语化、可爱、有情绪）</talk>
-<state>normal|happy|angry|sad|fear</state>
-<love>0~5整数</love>
-
-规则：
-1. 初始好感3，随玩家表现增减
-2. 表情与对话情绪一致
-3. 回复20~60字，自然亲切
--->
 </body>
 </html>
